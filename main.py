@@ -1,46 +1,54 @@
 import streamlit as st
 from datetime import datetime
+from firebase_config import db
+from emotion_model import detect_emotion
 
-st.set_page_config(page_title="My Diary", layout="centered")
+# Simulated login for now (replace with real auth later)
+st.title("🔐 Welcome to MoodDiary")
+email = st.text_input("Email")
+password = st.text_input("Password", type="password")
+login = st.button("Login / Register")
 
-# Sidebar for navigation or additional features
-st.sidebar.title("My Diary")
-st.sidebar.markdown("Your personal thoughts, secured.")
+if login:
+    if email and password:
+        st.session_state.user = email
+        st.success(f"Logged in as {email}")
+    else:
+        st.error("Please enter both email and password.")
 
-# Main Title
-st.title("📖 Daily Diary")
+# If logged in
+if "user" in st.session_state:
+    st.header("📖 Add a Diary Entry")
+    with st.form("entry_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", datetime.today())
+        entry_title = st.text_input("Title", "")
+        entry_text = st.text_area("What's on your mind?", height=200)
+        submitted = st.form_submit_button("Save Entry")
 
-# Section: Add New Diary Entry
-st.header("Add a New Entry")
-with st.form("entry_form", clear_on_submit=True):
-    entry_date = st.date_input("Date", datetime.today())
-    entry_title = st.text_input("Title", "")
-    entry_text = st.text_area("What's on your mind?", height=200)
-    submitted = st.form_submit_button("Save Entry")
+        if submitted and entry_text:
+            mood, confidence = detect_emotion(entry_text)
+            entry_data = {
+                "date": entry_date.strftime("%Y-%m-%d"),
+                "title": entry_title,
+                "text": entry_text,
+                "mood": mood,
+                "confidence": round(confidence, 2),
+                "timestamp": datetime.now()
+            }
+            # Save to Firestore
+            db.collection("diary").document(st.session_state.user).collection("entries").add(entry_data)
+            st.success(f"Entry saved! Detected mood: **{mood}** ({confidence:.0%})")
 
-    if submitted and entry_text:
-        # For demonstration, we just store it in session state (not persistent)
-        if "entries" not in st.session_state:
-            st.session_state.entries = []
-        st.session_state.entries.append({
-            "date": entry_date,
-            "title": entry_title,
-            "text": entry_text
-        })
-        st.success("Entry saved!")
+    st.markdown("---")
+    st.header("📅 Your Past Entries")
 
-st.markdown("---")
+    entries_ref = db.collection("diary").document(st.session_state.user).collection("entries").order_by("timestamp", direction="DESCENDING")
+    entries = entries_ref.stream()
 
-# Section: View Past Entries
-st.header("📅 Past Entries")
-if "entries" in st.session_state and st.session_state.entries:
-    for entry in reversed(st.session_state.entries):
-        with st.expander(f"{entry['date']} - {entry['title'] or 'No Title'}"):
-            st.write(entry["text"])
+    for entry in entries:
+        e = entry.to_dict()
+        with st.expander(f"{e['date']} - {e['title'] or 'No Title'} ({e['mood']})"):
+            st.write(e["text"])
+            st.caption(f"Mood: {e['mood']} ({e['confidence']*100:.0f}% confidence)")
 else:
-    st.info("No entries yet. Start writing your thoughts!")
-
-# Optional: Settings or About in sidebar
-st.sidebar.markdown("---")
-st.sidebar.subheader("About")
-st.sidebar.info("This is a simple diary app built with Streamlit. Your entries are stored in memory for this demo.")
+    st.info("Please log in to write or view your diary.")
